@@ -31,6 +31,7 @@ const PANEL_CUSTOM_ID = "ticket:painel";
 const CLAIM_CUSTOM_ID = "ticket:assumir";
 const CLOSE_CUSTOM_ID = "ticket:fechar";
 const CANCEL_CUSTOM_ID = "ticket:cancelar";
+const panelThumbnails = new Map<string, string>();
 
 const ticketTypes = [
   { label: "General Support", value: "suporte", description: "General issues or requests" },
@@ -77,6 +78,7 @@ async function registerCommand() {
 }
 
 async function sendPanel(interaction: import("discord.js").ChatInputCommandInteraction) {
+  if (!interaction.guildId) return;
   const title = interaction.options.getString("title") ?? "🎫 Support Center | Secret Forn";
   const thumbnail = interaction.options.getString("thumbnail");
   if (thumbnail) {
@@ -87,6 +89,9 @@ async function sendPanel(interaction: import("discord.js").ChatInputCommandInter
       return;
     }
   }
+
+  if (thumbnail) panelThumbnails.set(interaction.guildId, thumbnail);
+  else panelThumbnails.delete(interaction.guildId);
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
