@@ -5,15 +5,21 @@ import {
   ButtonStyle,
   ChannelType,
   Client,
-  EmbedBuilder,
+  ContainerBuilder,
   Events,
   GatewayIntentBits,
+  MessageFlags,
   PermissionFlagsBits,
   REST,
   Routes,
+  SectionBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   SlashCommandBuilder,
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
+  TextDisplayBuilder,
+  ThumbnailBuilder,
   TextChannel,
 } from "discord.js";
 
@@ -93,23 +99,36 @@ async function sendPanel(interaction: import("discord.js").ChatInputCommandInter
   if (thumbnail) panelThumbnails.set(interaction.guildId, thumbnail);
   else panelThumbnails.delete(interaction.guildId);
 
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle(title)
-    .setDescription([
-      "After requesting support, please wait for an administrator to respond.",
-      "This support channel is private and visible only to you and administrators.",
-      "",
-      "Select an option below to continue.",
-    ].join("\n"));
-  if (thumbnail) embed.setThumbnail(thumbnail);
-
   const menu = new StringSelectMenuBuilder()
     .setCustomId(PANEL_CUSTOM_ID)
     .setPlaceholder("Select the type of support...")
     .addOptions(ticketTypes);
 
-  await interaction.reply({ embeds: [embed], components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu)] });
+  const panel = new ContainerBuilder();
+  if (thumbnail) {
+    panel.addSectionComponents(
+      new SectionBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${title}`))
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(thumbnail)),
+    );
+  } else {
+    panel.addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${title}`));
+  }
+  panel
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addTextDisplayComponents(
+      new TextDisplayBuilder().setContent([
+        "After requesting support, please wait for an administrator to respond.",
+        "This support channel is private and visible only to you and administrators.",
+        "",
+        "Select an option below to continue.",
+      ].join("\n")),
+    )
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addActionRowComponents(new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(menu))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent("-# Select an option to open your ticket"));
+
+  await interaction.reply({ components: [panel], flags: MessageFlags.IsComponentsV2 } as never);
 }
 
 async function openTicket(interaction: StringSelectMenuInteraction) {
@@ -155,23 +174,32 @@ async function openTicket(interaction: StringSelectMenuInteraction) {
     ],
   });
 
-  const ticketEmbed = new EmbedBuilder()
-    .setColor(0x57f287)
-    .setTitle(`🎫 Ticket Open — ${selectedType?.label ?? "Support"}`)
-    .setDescription([
+  const ticketPanel = new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`# 🎫 Ticket Open — ${selectedType?.label ?? "Support"}`))
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `Hello, ${interaction.user}! Your ticket was opened successfully.`,
       "",
       "Please describe your request in detail and wait for an administrator to assist you.",
       "",
       "An administrator can claim this ticket using the button below.",
-    ].join("\n"));
+    ].join("\n")))
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addActionRowComponents(ticketButtons());
   // Opening a ticket mentions only the user who created it.
   await channel.send({
     content: `${interaction.user}`,
     allowedMentions: { users: [interaction.user.id] },
-    embeds: [ticketEmbed],
-    components: [ticketButtons()],
   });
+  const panelThumbnail = panelThumbnails.get(interaction.guild.id);
+  if (panelThumbnail) {
+    ticketPanel.addSectionComponents(
+      new SectionBuilder()
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent("-# Panel thumbnail"))
+        .setThumbnailAccessory(new ThumbnailBuilder().setURL(panelThumbnail)),
+    );
+  }
+  await channel.send({ components: [ticketPanel], flags: MessageFlags.IsComponentsV2 } as never);
   await interaction.editReply(`Your ticket was created in ${channel}.`);
 }
 
@@ -193,7 +221,11 @@ async function handleTicketButton(interaction: import("discord.js").ButtonIntera
       return;
     }
     await interaction.channel.setTopic(`${topic}:${interaction.user.id}`);
-    await interaction.reply({ embeds: [new EmbedBuilder().setColor(0x5865f2).setTitle("Ticket Claimed").setDescription(`${interaction.user} claimed this ticket.`)] });
+    const claimedPanel = new ContainerBuilder()
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent("# Ticket Claimed"))
+      .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`${interaction.user} claimed this ticket.`));
+    await interaction.reply({ components: [claimedPanel], flags: MessageFlags.IsComponentsV2 } as never);
     return;
   }
 
