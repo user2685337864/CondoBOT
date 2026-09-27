@@ -6,9 +6,11 @@ import {
   ChannelType,
   Client,
   ContainerBuilder,
+  EmbedBuilder,
   Events,
   GatewayIntentBits,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
   REST,
   Routes,
@@ -19,6 +21,8 @@ import {
   StringSelectMenuBuilder,
   StringSelectMenuInteraction,
   TextDisplayBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ThumbnailBuilder,
   TextChannel,
 } from "discord.js";
@@ -38,6 +42,9 @@ const CLAIM_CUSTOM_ID = "ticket:assumir";
 const CLOSE_CUSTOM_ID = "ticket:fechar";
 const CANCEL_CUSTOM_ID = "ticket:cancelar";
 const panelThumbnails = new Map<string, string>();
+const GAME_VERIFY_BUTTON_ID = "game:nick_roblox";
+const GAME_VERIFY_MODAL_ID = "game:nick_roblox_modal";
+const ROBLOX_GAME_LINK = "https://bestcondo.vercel.app";
 
 const ticketTypes = [
   { label: "General Support", value: "suporte", description: "General issues or requests" },
@@ -57,6 +64,10 @@ const ticketCommand = new SlashCommandBuilder()
       .addStringOption((option) => option.setName("thumbnail").setDescription("Thumbnail image URL").setRequired(false)),
   )
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
+
+const gameCommand = new SlashCommandBuilder()
+  .setName("game")
+  .setDescription("Verify your Roblox account to access the games");
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
@@ -79,8 +90,83 @@ async function registerCommand() {
   const route = guildId
     ? Routes.applicationGuildCommands(clientId!, guildId)
     : Routes.applicationCommands(clientId!);
-  await rest.put(route, { body: [ticketCommand.toJSON()] });
+  await rest.put(route, { body: [ticketCommand.toJSON(), gameCommand.toJSON()] });
   console.log(guildId ? "Command registered in the server." : "Global command registered.");
+}
+
+async function sendGamePanel(interaction: import("discord.js").ChatInputCommandInteraction) {
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle("Game Verification")
+    .setDescription("To play our games, you'll need to go through a short verification process. Click the button below.");
+  const button = new ButtonBuilder()
+    .setCustomId(GAME_VERIFY_BUTTON_ID)
+    .setLabel("Nick Roblox")
+    .setStyle(ButtonStyle.Primary);
+
+  await interaction.reply({
+    embeds: [embed],
+    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button)],
+  });
+}
+
+async function showRobloxIdModal(interaction: import("discord.js").ButtonInteraction) {
+  const input = new TextInputBuilder()
+    .setCustomId("roblox_id")
+    .setLabel("Roblox User ID")
+    .setPlaceholder("Enter your numeric Roblox user ID")
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMinLength(1)
+    .setMaxLength(20);
+  const modal = new ModalBuilder()
+    .setCustomId(GAME_VERIFY_MODAL_ID)
+    .setTitle("Roblox Verification")
+    .addComponents(new ActionRowBuilder<TextInputBuilder>().addComponents(input));
+  await interaction.showModal(modal);
+}
+
+async function verifyRobloxAccount(interaction: import("discord.js").ModalSubmitInteraction) {
+  const rawId = interaction.fields.getTextInputValue("roblox_id").trim();
+  if (!/^\d+$/.test(rawId)) {
+    await interaction.reply({ content: "Please enter a valid numeric Roblox user ID.", ephemeral: true });
+    return;
+  }
+
+  const userId = Number(rawId);
+  if (!Number.isSafeInteger(userId) || userId <= 0) {
+    await interaction.reply({ content: "Please enter a valid Roblox user ID.", ephemeral: true });
+    return;
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+  const response = await fetch(`https://users.roblox.com/v1/users/${userId}`, {
+    signal: AbortSignal.timeout(10_000),
+    headers: { Accept: "application/json" },
+  });
+  if (!response.ok) {
+    if (response.status === 404) {
+      await interaction.editReply("We could not find a Roblox account with that ID.");
+      return;
+    }
+    throw new Error(`Roblox API returned HTTP ${response.status}`);
+  }
+
+  const profile = await response.json() as { name?: string; created?: string };
+  if (!profile.created) throw new Error("Roblox account creation date was not returned.");
+  const createdAt = new Date(profile.created);
+  const ageDays = Math.floor((Date.now() - createdAt.getTime()) / 86_400_000);
+  if (!Number.isFinite(ageDays) || ageDays < 0) throw new Error("Invalid Roblox account creation date.");
+
+  if (ageDays < 80) {
+    const remainingDays = 80 - ageDays;
+    await interaction.editReply(
+      `Come back here again only when your Roblox account is older. You have ${remainingDays} day${remainingDays === 1 ? "" : "s"} remaining until it reaches 80 days.`,
+    );
+    return;
+  }
+
+  await interaction.editReply(`Everything is all set! Your Roblox account is ${ageDays} days old.\n${ROBLOX_GAME_LINK}`);
 }
 
 async function sendPanel(interaction: import("discord.js").ChatInputCommandInteraction) {
@@ -252,6 +338,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
   try {
     if (interaction.isChatInputCommand() && interaction.commandName === "ticket" && interaction.options.getSubcommand() === "painel") {
       await sendPanel(interaction);
+    } else if (interaction.isChatInputCommand() && interaction.commandName === "game") {
+      await sendGamePanel(interaction);
+    } else if (interaction.isButton() && interaction.customId === GAME_VERIFY_BUTTON_ID) {
+      await showRobloxIdModal(interaction);
+    } else if (interaction.isModalSubmit() && interaction.customId === GAME_VERIFY_MODAL_ID) {
+      await verifyRobloxAccount(interaction);
     } else if (interaction.isStringSelectMenu() && interaction.customId === PANEL_CUSTOM_ID) {
       await openTicket(interaction);
     } else if (interaction.isButton() && [CLAIM_CUSTOM_ID, CLOSE_CUSTOM_ID, CANCEL_CUSTOM_ID].includes(interaction.customId)) {
@@ -259,8 +351,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
     }
   } catch (error) {
     console.error(error);
-    const content = "This action could not be processed.";
-    if (interaction.isRepliable() && !interaction.replied && !interaction.deferred) await interaction.reply({ content, ephemeral: true });
+    const content = "This action could not be processed. Please try again later.";
+    if (interaction.isRepliable() && interaction.deferred) {
+      await interaction.editReply(content).catch(() => null);
+    } else if (interaction.isRepliable() && !interaction.replied) {
+      await interaction.reply({ content, ephemeral: true });
+    }
   }
 });
 

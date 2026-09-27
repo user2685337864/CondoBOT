@@ -32,3 +32,10 @@ npm start
 ```
 
 The bot needs `Manage Channels`, `View Channels`, `Send Messages`, and `Read Message History` permissions.
+
+## Game verification
+
+The `/game` command sends a verification panel with a `Nick Roblox` button. The button opens a modal where the user enters a numeric Roblox user ID. The bot checks the account creation date through the public Roblox Users API:
+
+- Accounts younger than 80 days receive the number of days remaining.
+- Accounts at least 80 days old receive the game link: https://bestcondo.vercel.app
