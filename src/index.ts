@@ -95,26 +95,26 @@ async function registerCommand() {
 }
 
 async function sendGamePanel(interaction: import("discord.js").ChatInputCommandInteraction) {
-  const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
-    .setTitle("Game Verification")
-    .setDescription("To play our games, you'll need to go through a short verification process. Click the button below.");
   const button = new ButtonBuilder()
     .setCustomId(GAME_VERIFY_BUTTON_ID)
     .setLabel("Nick Roblox")
     .setStyle(ButtonStyle.Primary);
+  const panel = new ContainerBuilder()
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent("# Game Verification"))
+    .addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      "To play our games, you'll need to go through a short verification process. Click the button below.",
+    ))
+    .addActionRowComponents(new ActionRowBuilder<ButtonBuilder>().addComponents(button));
 
-  await interaction.reply({
-    embeds: [embed],
-    components: [new ActionRowBuilder<ButtonBuilder>().addComponents(button)],
-  });
+  await interaction.reply({ components: [panel], flags: MessageFlags.IsComponentsV2 } as never);
 }
 
 async function showRobloxIdModal(interaction: import("discord.js").ButtonInteraction) {
   const input = new TextInputBuilder()
     .setCustomId("roblox_id")
-    .setLabel("Roblox User ID")
-    .setPlaceholder("Enter your numeric Roblox user ID")
+    .setLabel("Roblox Username or ID")
+    .setPlaceholder("Enter your Roblox username or numeric ID")
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
     .setMinLength(1)
@@ -127,19 +127,38 @@ async function showRobloxIdModal(interaction: import("discord.js").ButtonInterac
 }
 
 async function verifyRobloxAccount(interaction: import("discord.js").ModalSubmitInteraction) {
-  const rawId = interaction.fields.getTextInputValue("roblox_id").trim();
-  if (!/^\d+$/.test(rawId)) {
-    await interaction.reply({ content: "Please enter a valid numeric Roblox user ID.", ephemeral: true });
-    return;
-  }
-
-  const userId = Number(rawId);
-  if (!Number.isSafeInteger(userId) || userId <= 0) {
-    await interaction.reply({ content: "Please enter a valid Roblox user ID.", ephemeral: true });
+  const input = interaction.fields.getTextInputValue("roblox_id").trim();
+  if (!input || input.length > 20) {
+    await interaction.reply({ content: "Please enter a valid Roblox username or ID.", ephemeral: true });
     return;
   }
 
   await interaction.deferReply({ ephemeral: true });
+  let userId: number;
+  if (/^\d+$/.test(input)) {
+    userId = Number(input);
+  } else {
+    const lookup = await fetch("https://users.roblox.com/v1/usernames/users", {
+      method: "POST",
+      signal: AbortSignal.timeout(10_000),
+      headers: { Accept: "application/json", "Content-Type": "application/json" },
+      body: JSON.stringify({ usernames: [input], excludeBannedUsers: false }),
+    });
+    if (!lookup.ok) throw new Error(`Roblox username lookup returned HTTP ${lookup.status}`);
+    const result = await lookup.json() as { data?: Array<{ id: number; name: string }> };
+    const match = result.data?.[0];
+    if (!match) {
+      await interaction.editReply("We could not find a Roblox account with that username.");
+      return;
+    }
+    userId = match.id;
+  }
+
+  if (!Number.isSafeInteger(userId) || userId <= 0) {
+    await interaction.editReply("Please enter a valid Roblox username or ID.");
+    return;
+  }
+
   const response = await fetch(`https://users.roblox.com/v1/users/${userId}`, {
     signal: AbortSignal.timeout(10_000),
     headers: { Accept: "application/json" },
@@ -158,15 +177,18 @@ async function verifyRobloxAccount(interaction: import("discord.js").ModalSubmit
   const ageDays = Math.floor((Date.now() - createdAt.getTime()) / 86_400_000);
   if (!Number.isFinite(ageDays) || ageDays < 0) throw new Error("Invalid Roblox account creation date.");
 
+  const resultPanel = new ContainerBuilder();
   if (ageDays < 80) {
     const remainingDays = 80 - ageDays;
-    await interaction.editReply(
+    resultPanel.addTextDisplayComponents(new TextDisplayBuilder().setContent(
       `Come back here again only when your Roblox account is older. You have ${remainingDays} day${remainingDays === 1 ? "" : "s"} remaining until it reaches 80 days.`,
-    );
-    return;
+    ));
+  } else {
+    resultPanel.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `Everything is all set! Your Roblox account is ${ageDays} days old.\n[Open the games](${ROBLOX_GAME_LINK})`,
+    ));
   }
-
-  await interaction.editReply(`Everything is all set! Your Roblox account is ${ageDays} days old.\n${ROBLOX_GAME_LINK}`);
+  await interaction.editReply({ components: [resultPanel], flags: MessageFlags.IsComponentsV2 } as never);
 }
 
 async function sendPanel(interaction: import("discord.js").ChatInputCommandInteraction) {
