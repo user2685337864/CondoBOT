@@ -45,9 +45,11 @@ const ticketCommand = new SlashCommandBuilder()
   .addSubcommand((subcommand) =>
     subcommand
       .setName("painel")
-      .setDescription("Sends the ticket opening panel in the current channel"),
+      .setDescription("Sends the ticket opening panel in the current channel")
+      .addStringOption((option) => option.setName("title").setDescription("Panel title").setRequired(false))
+      .addStringOption((option) => option.setName("thumbnail").setDescription("Thumbnail image URL").setRequired(false)),
   )
-  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator);
+  .setDefaultMemberPermissions(PermissionFlagsBits.ManageChannels);
 
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers],
@@ -75,13 +77,27 @@ async function registerCommand() {
 }
 
 async function sendPanel(interaction: import("discord.js").ChatInputCommandInteraction) {
+  const title = interaction.options.getString("title") ?? "🎫 Support Center | Secret Forn";
+  const thumbnail = interaction.options.getString("thumbnail");
+  if (thumbnail) {
+    try {
+      new URL(thumbnail);
+    } catch {
+      await interaction.reply({ content: "The thumbnail URL is invalid. Use a complete URL, such as https://...", ephemeral: true });
+      return;
+    }
+  }
+
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle("Support Center")
+    .setTitle(title)
     .setDescription([
-      "Select an option below to open your ticket.",
-      "Your ticket will be private and visible to you and the administrators.",
+      "After requesting support, please wait for an administrator to respond.",
+      "This support channel is private and visible only to you and administrators.",
+      "",
+      "Select an option below to continue.",
     ].join("\n"));
+  if (thumbnail) embed.setThumbnail(thumbnail);
 
   const menu = new StringSelectMenuBuilder()
     .setCustomId(PANEL_CUSTOM_ID)
@@ -136,13 +152,14 @@ async function openTicket(interaction: StringSelectMenuInteraction) {
 
   const ticketEmbed = new EmbedBuilder()
     .setColor(0x57f287)
-    .setTitle(`Ticket Open — ${selectedType?.label ?? "Support"}`)
+    .setTitle(`🎫 Ticket Open — ${selectedType?.label ?? "Support"}`)
     .setDescription([
       `Hello, ${interaction.user}! Your ticket was opened successfully.`,
       "",
       "Please describe your request in detail and wait for an administrator to assist you.",
+      "",
+      "An administrator can claim this ticket using the button below.",
     ].join("\n"));
-
   // Opening a ticket mentions only the user who created it.
   await channel.send({
     content: `${interaction.user}`,
